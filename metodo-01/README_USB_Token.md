@@ -1,385 +1,415 @@
-# USB como Token de Autenticação no Linux
+# Método 1 — Controle de sessão com pendrive USB
 
-Projeto experimental para transformar um pendrive USB comum em um
-mecanismo de autenticação/controle de sessão no Linux.
+Guia para configurar o bloqueio e o desbloqueio automático de uma sessão gráfica no Debian 13 usando `udev`, Bash e `loginctl`.
 
-O projeto está sendo desenvolvido e testado em uma máquina virtual com
-Debian 13 e será dividido em duas abordagens:
+**Status:** implementação validada no Debian instalado diretamente no SSD, incluindo teste após reinicialização.
 
-1.  Controle de sessão utilizando `udev`, `loginctl` e um script Bash.
-2.  Autenticação utilizando PAM (`pam_usb`).
+Este método controla uma sessão já iniciada. Ele não autentica o primeiro login e não torna o pendrive obrigatório: a senha continua permitindo entrar e desbloquear a sessão.
 
-> **Status atual:** Etapa 1 funcionando.
+## 1. Ambiente e comportamento esperado
 
-------------------------------------------------------------------------
+| Item | Ambiente validado |
+| --- | --- |
+| Sistema | Debian GNU/Linux 13 (trixie) |
+| Instalação | Diretamente no SSD, sem máquina virtual |
+| Interface gráfica | GNOME |
+| Tipo de sessão | Wayland |
+| Gerenciador de login | GDM |
+| Usuário | `henrique` |
+| Pendrive | SanDisk Cruzer Blade |
+| Vendor ID / Product ID | `0781:5567` |
+| Número de série | `4C530101421215115090` |
 
-## 1. Ambiente utilizado
+| Evento | Resultado esperado |
+| --- | --- |
+| Remover o pendrive cadastrado | Bloquear a sessão gráfica de `henrique` |
+| Reconectar o pendrive cadastrado | Solicitar o desbloqueio da sessão gráfica |
+| Inicializar sem o pendrive | Login convencional continua disponível |
 
--   Debian 13
--   VirtualBox
--   Pendrive SanDisk Cruzer Blade
--   USB ID: `0781:5567`
--   Usuário de teste: `rique`
--   Sessão gráfica gerenciada pelo `systemd-logind`
+O `udev` identifica o evento e executa o script como root. O script encontra a sessão gráfica do usuário e chama `loginctl`. O ambiente gráfico precisa atender às solicitações de bloqueio e desbloqueio; isso foi confirmado no GNOME deste ambiente.
 
-------------------------------------------------------------------------
+As capturas estão organizadas cronologicamente e distribuídas junto aos passos correspondentes. A pasta `./images/` deve permanecer ao lado deste README para os caminhos relativos funcionarem no GitHub. Os testes de bloqueio, desbloqueio e persistência foram confirmados durante a configuração; as capturas abaixo registram os comandos e configurações disponíveis.
 
-## 2. Objetivo da primeira etapa
+## 2. Identificar o ambiente e o dispositivo
 
-A primeira implementação não modifica diretamente o processo de login do
-Linux.
+Conecte o pendrive e execute no terminal da sessão gráfica:
 
-O objetivo é controlar uma sessão gráfica já iniciada:
-
--   Pendrive conectado → sessão desbloqueada
--   Pendrive removido → sessão bloqueada
-
-O funcionamento geral é:
-
-``` text
-USB
- ↓
-udev
- ↓
-Regra 80-usb.rules
- ↓
-usb-lock.sh
- ↓
-loginctl
- ↓
-Bloqueio/desbloqueio da sessão
-```
-
-**Importante:** nesta etapa, o pendrive não é necessário para realizar o
-primeiro login após inicializar o sistema. Isso será explorado
-posteriormente utilizando PAM.
-
-------------------------------------------------------------------------
-
-## 3. Identificação do dispositivo USB
-
-Primeiramente, o dispositivo foi identificado com:
-
-``` bash
+```bash
+cat /etc/os-release
+whoami
+printf 'Desktop: %s\nTipo da sessão: %s\n' "$XDG_CURRENT_DESKTOP" "$XDG_SESSION_TYPE"
+systemctl status display-manager --no-pager
 lsusb
+lsblk -o NAME,TRAN,SIZE,FSTYPE,LABEL,UUID,MOUNTPOINTS
+loginctl list-sessions
 ```
 
-O pendrive utilizado apareceu como:
 
-``` text
-Bus ... Device ...: ID 0781:5567 SanDisk Corp. Cruzer Blade
+
+![Identificação do Debian 13, do usuário henrique e da sessão GNOME com Wayland](./images/01-2026-10-01-13-42-10.png)
+
+*Figura 1 — Identificação do Debian 13, do usuário henrique e da sessão GNOME com Wayland.*
+
+![GDM ativo como gerenciador de login gráfico](./images/02-2026-10-01-13-42-34.png)
+
+*Figura 2 — GDM ativo como gerenciador de login gráfico.*
+
+![Identificação do SanDisk com lsusb e dos discos com lsblk](./images/03-2026-10-01-13-43-25.png)
+
+*Figura 3 — Identificação do SanDisk com lsusb e dos discos com lsblk.*
+
+![Listagem da sessão gráfica e da sessão manager](./images/04-2026-10-01-13-43-40.png)
+
+*Figura 4 — Listagem da sessão gráfica e da sessão manager.*
+
+No ambiente validado, `lsusb` mostrou:
+
+```text
+ID 0781:5567 SanDisk Corp. Cruzer Blade
 ```
 
-Portanto:
+O disco USB apareceu como `/dev/sda`, com uma partição `/dev/sda1`. **Esse nome pode mudar:** confirme o dispositivo com `lsblk` antes de usar os próximos comandos. Não selecione o disco do sistema.
 
--   Vendor ID: `0781`
--   Product ID: `5567`
+Consulte as propriedades sem paginação:
 
-Também foi possível confirmar as propriedades reconhecidas pelo `udev`:
-
-``` bash
-udevadm info --query=property --name=/dev/sdb
+```bash
+udevadm info --query=property --name=/dev/sda --no-pager
 ```
 
-E especificamente:
+Propriedades utilizadas nas regras:
 
-``` bash
-udevadm info --query=property --name=/dev/sdb | grep -E 'ID_VENDOR_ID|ID_MODEL_ID'
-```
-
-Resultado:
-
-``` text
-ID_MODEL_ID=5567
+```text
+DEVTYPE=disk
+ID_BUS=usb
 ID_VENDOR_ID=0781
+ID_MODEL_ID=5567
+ID_SERIAL_SHORT=4C530101421215115090
 ```
 
-------------------------------------------------------------------------
 
-## 4. Regra udev
 
-Foi criado o arquivo:
+![Propriedades do disco USB, incluindo fabricante, modelo e serial](./images/05-2026-10-01-13-44-11.png)
 
-``` text
-/etc/udev/rules.d/80-usb.rules
+*Figura 5 — Propriedades do disco USB, incluindo fabricante, modelo e serial.*
+
+![Continuação das propriedades USB e dos caminhos associados ao dispositivo](./images/06-2026-10-01-13-44-18.png)
+
+*Figura 6 — Continuação das propriedades USB e dos caminhos associados ao dispositivo.*
+
+Para consultar os atributos do dispositivo e de seus ancestrais:
+
+```bash
+udevadm info --attribute-walk --name=/dev/sda --no-pager
 ```
 
-Com regras para detectar a inserção e remoção do dispositivo:
 
-``` udev
-ACTION=="add", SUBSYSTEMS=="usb", ATTR{idVendor}=="0781", ATTR{idProduct}=="5567", RUN+="/usr/local/bin/usb-lock.sh unlock"
 
-ACTION=="remove", SUBSYSTEMS=="usb", ENV{ID_VENDOR_ID}=="0781", ENV{ID_MODEL_ID}=="5567", RUN+="/usr/local/bin/usb-lock.sh lock"
+![Consulta aos atributos do dispositivo com udevadm info --attribute-walk](./images/07-2026-10-01-13-45-13.png)
+
+*Figura 7 — Consulta aos atributos do dispositivo com udevadm info --attribute-walk.*
+
+As regras deste guia utilizam as propriedades `ENV{...}` já identificadas, sem depender do nome `/dev/sda`.
+
+> Para reproduzir em outro computador ou com outro pendrive, ajuste o usuário no script e os identificadores nas regras. Não copie o serial deste exemplo para um dispositivo diferente.
+
+## 3. Testar o controle da sessão antes de configurar o USB
+
+Salve os trabalhos abertos. Consulte:
+
+```bash
+loginctl list-sessions
 ```
 
-Após modificar as regras:
+No teste realizado, havia uma sessão gráfica `2`, do usuário `henrique`, associada a `seat0`, e uma sessão `manager` com ID `3`. A sessão correta era `2`.
 
-``` bash
+Confirme as propriedades, substituindo `2` pelo ID atual da sua sessão gráfica:
+
+```bash
+loginctl show-session 2 -p Name -p Seat -p Type -p Class
+```
+
+
+
+![Confirmação de Name=henrique, Seat=seat0, Type=wayland e Class=user na sessão 2](./images/08-2026-10-01-13-45-36.png)
+
+*Figura 8 — Confirmação de Name=henrique, Seat=seat0, Type=wayland e Class=user na sessão 2.*
+
+Execute o teste abaixo, também ajustando o ID nas duas chamadas se necessário:
+
+```bash
+sudo -v
+(
+    sleep 10
+    sudo -n loginctl unlock-session 2
+) &
+sudo -n loginctl lock-session 2
+```
+
+A tela deve bloquear imediatamente e desbloquear após aproximadamente 10 segundos. Se permanecer bloqueada, utilize sua senha normalmente.
+
+**Resultado observado:** bloqueio e desbloqueio funcionando.
+
+### Erro encontrado: terminal sem sessão reconhecida
+
+A tentativa inicial com `loginctl lock-session "$XDG_SESSION_ID"` e a chamada correspondente de desbloqueio retornaram:
+
+```text
+Failed to issue method call: Caller does not belong to any known session.
+```
+
+Nesse teste, o comando não conseguiu resolver a sessão a partir do contexto do terminal. Usar `sudo` e o ID explícito da sessão gráfica resolveu o problema. Não foi necessário alterar o PAM.
+
+O ID explícito é usado apenas neste diagnóstico. O script definitivo identifica a sessão dinamicamente.
+
+## 4. Criar o script de controle
+
+Crie o arquivo:
+
+```bash
+sudo nano /usr/local/bin/usb-lock.sh
+```
+
+Cole o conteúdo:
+
+```bash
+#!/bin/bash
+
+case "${1:-}" in
+    lock|unlock) action="$1" ;;
+    *) exit 1 ;;
+esac
+
+while read -r session_id; do
+    name=$(loginctl show-session "$session_id" -p Name --value)
+    seat=$(loginctl show-session "$session_id" -p Seat --value)
+    type=$(loginctl show-session "$session_id" -p Type --value)
+
+    if [[ "$name" == "henrique" && "$seat" == "seat0" &&
+          ( "$type" == "wayland" || "$type" == "x11" ) ]]; then
+        loginctl "${action}-session" "$session_id"
+    fi
+done < <(loginctl list-sessions --no-legend --no-pager | awk '{print $1}')
+```
+
+
+
+![Conteúdo do script usb-lock.sh no editor Nano](./images/09-2026-10-01-13-46-00.png)
+
+*Figura 9 — Conteúdo do script usb-lock.sh no editor Nano.*
+
+Salve com **Ctrl+O**, confirme com **Enter** e saia com **Ctrl+X**.
+
+O script aceita apenas `lock` ou `unlock` e procura sessões que atendam às três condições:
+
+- Usuário `henrique`.
+- Assento `seat0`.
+- Tipo `wayland` ou `x11`.
+
+Isso evita selecionar a sessão `manager` e dispensa um ID fixo. Se houver mais de uma sessão correspondente, o comando será enviado a cada uma.
+
+Configure o proprietário e as permissões:
+
+```bash
+sudo chown root:root /usr/local/bin/usb-lock.sh
+sudo chmod 755 /usr/local/bin/usb-lock.sh
+sudo bash -n /usr/local/bin/usb-lock.sh
+```
+
+O último comando verifica a sintaxe Bash e não deve produzir mensagem em caso de sucesso.
+
+
+
+![Definição do proprietário, das permissões e verificação da sintaxe Bash](./images/10-2026-10-01-13-46-16.png)
+
+*Figura 10 — Definição do proprietário, das permissões e verificação da sintaxe Bash.*
+
+## 5. Testar o script isoladamente
+
+```bash
+sudo -v
+(
+    sleep 10
+    sudo -n /usr/local/bin/usb-lock.sh unlock
+) &
+sudo -n /usr/local/bin/usb-lock.sh lock
+```
+
+**Resultado esperado e observado:** a sessão bloqueia imediatamente e desbloqueia após aproximadamente 10 segundos.
+
+Se esse teste falhar, resolva o problema antes de criar as regras. Assim é possível distinguir problemas no script de problemas na detecção do USB.
+
+## 6. Criar as regras udev
+
+Crie o arquivo:
+
+```bash
+sudo nano /etc/udev/rules.d/80-usb.rules
+```
+
+Cole as duas regras, mantendo cada uma em uma única linha:
+
+```udev
+ACTION=="add", SUBSYSTEM=="block", ENV{DEVTYPE}=="disk", ENV{ID_BUS}=="usb", ENV{ID_VENDOR_ID}=="0781", ENV{ID_MODEL_ID}=="5567", ENV{ID_SERIAL_SHORT}=="4C530101421215115090", RUN+="/usr/local/bin/usb-lock.sh unlock"
+ACTION=="remove", SUBSYSTEM=="block", ENV{DEVTYPE}=="disk", ENV{ID_BUS}=="usb", ENV{ID_VENDOR_ID}=="0781", ENV{ID_MODEL_ID}=="5567", ENV{ID_SERIAL_SHORT}=="4C530101421215115090", RUN+="/usr/local/bin/usb-lock.sh lock"
+```
+
+
+
+![Regras de inserção e remoção no Nano; parte das linhas longas fica fora da área visível](./images/11-2026-10-01-13-46-27.png)
+
+*Figura 11 — Regras de inserção e remoção no Nano; parte das linhas longas fica fora da área visível.*
+
+Salve e saia do editor.
+
+As regras filtram eventos do disco USB, excluindo os eventos das partições por meio de `DEVTYPE=="disk"`. Além do fabricante e do modelo, verificam o serial do pendrive.
+
+Na remoção, as propriedades usadas pela regra vêm do estado do dispositivo mantido pelo `udev`; o teste de remoção confirmou o funcionamento nesse ambiente.
+
+Verifique a sintaxe e recarregue as regras:
+
+```bash
+sudo udevadm verify /etc/udev/rules.d/80-usb.rules
 sudo udevadm control --reload-rules
 ```
 
-A sintaxe também pode ser verificada com:
 
-``` bash
-sudo udevadm verify /etc/udev/rules.d/80-usb.rules
+
+![Validação das regras com um arquivo aprovado e nenhuma falha, seguida da recarga do udev](./images/12-2026-10-01-13-46-39.png)
+
+*Figura 12 — Validação das regras com um arquivo aprovado e nenhuma falha, seguida da recarga do udev.*
+
+A recarga aplica a configuração aos próximos eventos. Não é necessário reiniciar para fazer o primeiro teste: retire e reconecte o pendrive.
+
+## 7. Testar com o pendrive
+
+1. Feche arquivos abertos no pendrive e aguarde a conclusão de cópias ou gravações.
+2. Desmonte o volume pelo aplicativo Arquivos antes de retirar o dispositivo.
+3. Retire fisicamente o pendrive: a sessão deverá bloquear.
+4. Reconecte o mesmo pendrive: a sessão deverá desbloquear.
+
+**Resultado observado:** ambos os eventos funcionaram corretamente.
+
+## 8. Validar após reinicialização
+
+1. Reinicie o Debian com o pendrive conectado.
+2. Faça login normalmente usando sua senha.
+3. Feche os arquivos do pendrive e desmonte seu volume.
+4. Retire o pendrive e confirme o bloqueio.
+5. Reconecte o pendrive e confirme o desbloqueio.
+
+**Resultado observado:** a configuração continuou funcionando após reiniciar, sem ajustar o ID da sessão.
+
+## 9. Diagnóstico de falhas
+
+| Sintoma | Verificação |
+| --- | --- |
+| Script não bloqueia a tela | Execute o teste da seção 3 e confira `Name`, `Seat` e `Type` da sessão |
+| Script funciona, mas USB não aciona | Confira os identificadores, valide o arquivo de regras e recarregue o `udev` |
+| Outro pendrive não desbloqueia | Comportamento esperado: a regra exige o serial cadastrado |
+| Funciona antes de reiniciar, mas falha depois | Confira se o script encontra a sessão atual; não fixe um ID no script |
+| Propriedades aparecem cortadas | Use `--no-pager` nos comandos `udevadm info` |
+
+Para observar os eventos, abra um terminal e execute:
+
+```bash
+sudo udevadm monitor --udev --property --subsystem-match=block
 ```
 
-------------------------------------------------------------------------
+Retire e reconecte o pendrive após desmontar o volume. Encerre o monitor com **Ctrl+C**.
 
-## 5. Script de controle da sessão
 
-Foi criado:
 
-``` text
-/usr/local/bin/usb-lock.sh
+![Monitoramento de um evento remove da partição USB; as regras do método atuam no disco](./images/13-2026-10-01-13-47-08.png)
+
+*Figura 13 — Monitoramento de um evento remove da partição USB; as regras do método atuam no disco.*
+
+![Continuação das propriedades exibidas durante o monitoramento](./images/14-2026-10-01-13-47-16.png)
+
+*Figura 14 — Continuação das propriedades exibidas durante o monitoramento.*
+
+Para consultar mensagens recentes do serviço:
+
+```bash
+sudo journalctl -u systemd-udevd -b --no-pager -n 100
 ```
 
-O script identifica a sessão gráfica do usuário `rique` associada ao
-`seat0`:
 
-``` bash
-#!/bin/bash
 
-SESSION_ID=$(loginctl list-sessions --no-legend | awk '$3=="rique" && $4=="seat0" {print $1; exit}')
+![Consulta ao journal do systemd-udevd, com mensagens do serviço e de outras regras do sistema](./images/15-2026-10-01-13-47-27.png)
 
-if [ "$1" == "lock" ]; then
-    loginctl lock-session "$SESSION_ID"
-elif [ "$1" == "unlock" ]; then
-    loginctl unlock-session "$SESSION_ID"
-fi
+*Figura 15 — Consulta ao journal do systemd-udevd, com mensagens do serviço e de outras regras do sistema.*
+
+![Continuação do journal; os avisos visíveis citam a regra 90-alsa-restore.rules](./images/16-2026-10-01-13-47-30.png)
+
+*Figura 16 — Continuação do journal; os avisos visíveis citam a regra 90-alsa-restore.rules.*
+
+Os prints do monitor e do journal documentam a inspeção dos eventos. Não demonstram, por si só, a mudança visual de estado da sessão. Os avisos mostrados citam uma regra de áudio, não o arquivo `80-usb.rules` deste método.
+
+## 10. Desativar ou remover a configuração
+
+Para desativar as regras, preservando uma cópia:
+
+```bash
+sudo mv /etc/udev/rules.d/80-usb.rules /etc/udev/rules.d/80-usb.rules.disabled
+sudo udevadm control --reload-rules
 ```
 
-O script precisa ser executável:
+Para reativá-las:
 
-``` bash
-sudo chmod +x /usr/local/bin/usb-lock.sh
+```bash
+sudo mv /etc/udev/rules.d/80-usb.rules.disabled /etc/udev/rules.d/80-usb.rules
+sudo udevadm control --reload-rules
 ```
 
-### Por que não utilizar um ID fixo?
 
-O ID da sessão pode mudar após logout ou reinicialização.
 
-Por exemplo:
+![Desativação e reativação das regras, com recarga do udev após cada alteração](./images/17-2026-10-01-13-47-53.png)
 
-``` text
-2  1000  rique  seat0
+*Figura 17 — Desativação e reativação das regras, com recarga do udev após cada alteração.*
+
+Se desejar remover completamente uma configuração que esteja ativa:
+
+```bash
+sudo rm /etc/udev/rules.d/80-usb.rules
+sudo udevadm control --reload-rules
+sudo rm /usr/local/bin/usb-lock.sh
 ```
 
-pode posteriormente se tornar:
-
-``` text
-5  1000  rique  seat0
-```
-
-Por isso, o script procura dinamicamente a sessão gráfica do usuário em
-vez de utilizar um número fixo.
-
-------------------------------------------------------------------------
-
-## 6. Problemas encontrados
-
-### 6.1 `aws: comando não encontrado`
-
-O script inicialmente continha:
-
-``` bash
-aws '{print $1}'
-```
-
-O correto era:
-
-``` bash
-awk '{print $1}'
-```
-
-### 6.2 SESSION_ID sendo interpretado literalmente
-
-Inicialmente havia:
-
-``` bash
-loginctl lock-session "SESSION_ID"
-```
-
-Isso fazia o `loginctl` procurar literalmente uma sessão chamada
-`SESSION_ID`.
-
-A variável precisa ser referenciada com `$`:
-
-``` bash
-loginctl lock-session "$SESSION_ID"
-```
-
-### 6.3 IDs USB com `< >`
-
-Inicialmente a regra continha:
-
-``` udev
-ATTR{idVendor}=="<0781>"
-ATTR{idProduct}=="<5567>"
-```
-
-Os símbolos `< >` presentes no tutorial eram apenas placeholders.
-
-O correto é:
-
-``` udev
-ATTR{idVendor}=="0781"
-ATTR{idProduct}=="5567"
-```
-
-### 6.4 `udev` executava o script, mas a tela não bloqueava
-
-Foi adicionado temporariamente um log ao script:
-
-``` bash
-echo "$(date) argumento=$1" >> /tmp/usb-lock.log
-```
-
-Isso demonstrou que o `udev` estava executando corretamente:
-
-``` text
-argumento=unlock
-argumento=lock
-```
-
-Portanto, o problema não estava mais na regra `udev`.
-
-### 6.5 Sessão incorreta sendo selecionada
-
-O script originalmente procurava o usuário desta forma:
-
-``` bash
-loginctl list-sessions | grep 'rique' | awk '{print $1}' | head -n 1
-```
-
-Porém, existiam múltiplas sessões relacionadas ao usuário.
-
-O script acabou selecionando uma sessão `manager`, por exemplo:
-
-``` text
-SESSION_ID='3'
-```
-
-em vez da sessão gráfica real.
-
-A solução foi procurar especificamente a sessão do usuário associada ao
-`seat0`:
-
-``` bash
-SESSION_ID=$(loginctl list-sessions --no-legend | awk '$3=="rique" && $4=="seat0" {print $1; exit}')
-```
-
-Após essa alteração, a remoção do pendrive passou a bloquear
-corretamente a sessão.
-
-------------------------------------------------------------------------
-
-## 7. Testes realizados
-
-### Remoção do pendrive
-
-``` text
-Pendrive removido
-       ↓
-udev detecta "remove"
-       ↓
-usb-lock.sh lock
-       ↓
-loginctl lock-session
-       ↓
-Sessão bloqueada
-```
-
-**Resultado:** funcionando.
-
-### Inserção do pendrive
-
-``` text
-Pendrive conectado
-       ↓
-udev detecta "add"
-       ↓
-usb-lock.sh unlock
-       ↓
-loginctl unlock-session
-       ↓
-Sessão desbloqueada
-```
-
-**Resultado:** funcionando.
-
-### Reinicialização
-
-A máquina virtual foi desligada/reiniciada para verificar a persistência
-da configuração.
-
-Após a reinicialização:
-
--   regras `udev` continuaram funcionando;
--   remoção do USB continuou bloqueando a sessão;
--   inserção do USB continuou desbloqueando a sessão;
--   não foi necessário configurar novamente o ID da sessão.
-
-**Resultado:** funcionando.
-
-------------------------------------------------------------------------
-
-## 8. Limitações da implementação atual
-
-Esta implementação controla uma sessão existente, mas não substitui a
-autenticação do sistema.
-
-Portanto, após inicializar o Debian, ainda é possível realizar o login
-normalmente sem o pendrive.
-
-Além disso, atualmente o script está configurado especificamente para:
-
-``` text
-rique
-```
-
-Ele encontra dinamicamente a sessão desse usuário, mas ainda não é uma
-implementação global para qualquer usuário do sistema.
-
-Outro ponto importante é que a identificação atual utiliza Vendor ID e
-Product ID. Dois dispositivos USB do mesmo modelo podem compartilhar
-esses identificadores. Portanto, esta implementação deve ser tratada
-como um experimento de autenticação/controle de sessão, e não como
-equivalente de segurança a uma chave de hardware dedicada.
-
-------------------------------------------------------------------------
-
-## 9. Próxima etapa --- PAM
-
-A próxima etapa do projeto será estudar a autenticação através do PAM
-(Pluggable Authentication Modules).
-
-O objetivo será comparar o método atual com uma solução que participe
-efetivamente do processo de autenticação do Linux.
-
-### A fazer
-
--   [x] Instalar Debian 13 na VM
--   [x] Configurar passthrough USB no VirtualBox
--   [x] Identificar Vendor ID e Product ID
--   [x] Criar regra `udev`
--   [x] Criar script Bash
--   [x] Detectar inserção do pendrive
--   [x] Detectar remoção do pendrive
--   [x] Bloquear sessão ao remover USB
--   [x] Desbloquear sessão ao inserir USB
--   [x] Testar após reinicialização
--   [ ] Remover código temporário de debug
--   [ ] Estudar `pam_usb`
--   [ ] Instalar e configurar PAM
--   [ ] Testar autenticação no login
--   [ ] Comparar as duas abordagens
-
-------------------------------------------------------------------------
+Se as regras já estiverem desativadas, remova o arquivo `.disabled` em vez do arquivo `.rules`.
+
+Essas operações não alteram a senha nem os arquivos PAM. Se a tela estiver bloqueada, desbloqueie-a normalmente com sua senha.
+
+## 11. Limitações e relação com o método 2
+
+- O método 1 atua somente em sessões existentes; não autentica o login inicial.
+- A senha continua permitindo desbloquear a sessão sem o pendrive.
+- O bloqueio ocorre no evento de remoção. Este método não monitora continuamente se o pendrive está ausente.
+- O serial distingue o dispositivo nas regras, mas não é uma prova criptográfica de identidade e pode ser imitado.
+- Reconectar o dispositivo correspondente solicita desbloqueio sem verificar senha ou material criptográfico.
+- O funcionamento depende do ambiente gráfico atender aos comandos de `loginctl`.
+- A configuração cobre apenas o usuário e o assento especificados no script.
+
+O método 2 utilizará PAM e `pam_usb` para participar da autenticação. Ao avançar para ele, será necessário revisar o desbloqueio automático do método 1: `loginctl unlock-session` pode liberar a sessão sem passar pela autenticação que se pretende exigir.
+
+## 12. Checklist da implementação validada
+
+- [x] Confirmar Debian 13, GNOME, Wayland e GDM.
+- [x] Identificar o usuário e a sessão gráfica.
+- [x] Identificar fabricante, modelo e serial do pendrive.
+- [x] Testar bloqueio e desbloqueio com `sudo loginctl`.
+- [x] Criar script com identificação dinâmica da sessão.
+- [x] Configurar proprietário e permissões.
+- [x] Verificar a sintaxe e testar o script.
+- [x] Criar regras para o disco USB e serial específico.
+- [x] Validar e recarregar as regras.
+- [x] Testar remoção e reconexão do pendrive.
+- [x] Confirmar funcionamento após reinicialização.
 
 ## Referências
 
--   Aniket Bhattacharyea --- *Use your USB as security key in Linux*
--   Linux Uprising --- *How To Login With A USB Flash Drive Instead Of A
-    Password On Linux Using pam_usb*
--   LinuxConfig --- *USB Authentication on Linux with PAM Setup*
+- [Repositório do projeto](https://github.com/rique-decoder/linux-usb-security-token)
+- [Documentação do loginctl](https://www.freedesktop.org/software/systemd/man/latest/loginctl.html)
+- [Documentação do udev](https://www.freedesktop.org/software/systemd/man/latest/udev.html)
+- [Documentação do udevadm](https://www.freedesktop.org/software/systemd/man/latest/udevadm.html)
+
+Os resultados deste guia correspondem aos testes confirmados pelo usuário durante a configuração do Debian instalado no SSD.
