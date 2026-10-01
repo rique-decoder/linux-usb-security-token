@@ -25,6 +25,9 @@ sudo apt update
 sudo apt install git build-essential pkg-config libpam0g-dev libudisks2-dev libdbus-1-dev libxml2-dev libglib2.0-dev libudev-dev libevdev-dev python3 python3-gi python3-dotenv udisks2 gir1.2-udisks-2.0 gawk
 ```
 
+![instalação](./images/Captura%20de%20tela%20de%202026-10-01%2017-06-56.png)
+
+
 Clone do projeto:
 
 ```bash
@@ -56,8 +59,9 @@ Resultado esperado:
 ```text
 Version 0.9.3
 ```
+![verificando pam](./images/Captura%20de%20tela%20de%202026-10-01%2017-10-53.png)
 
-![Validação da instalação do pam_usb](./images/Captura%20de%20tela%20de%202026-10-01%2017-06-56.png)
+
 
 ---
 
@@ -74,26 +78,26 @@ Cadastro:
 sudo pamusb-conf --add-device SanDisk
 ```
 
+![config usb drive](./images/Captura%20de%20tela%20de%202026-10-01%2017-11-12.png)
+
 Depois:
 
 ```bash
 sudo pamusb-conf --add-user henrique
 ```
 
-Teste com USB conectado:
+
+![config user](./images/Captura%20de%20tela%20de%202026-10-01%2017-11-25.png)
+
+
+Teste com USB conectado e depois desconectado:
 
 ```bash
 pamusb-check henrique
 ```
 
-Resultado esperado:
+![checagem login](./images/Captura%20de%20tela%20de%202026-10-01%2017-12-05.png)
 
-```text
-Authentication device "SanDisk" is connected.
-Access granted.
-```
-
-![Cadastro e teste do dispositivo USB](./images/Captura%20de%20tela%20de%202026-10-01%2017-07-00.png)
 
 ---
 
@@ -117,13 +121,14 @@ auth sufficient pam_usb.so
 auth [success=1 default=ignore] pam_unix.so nullok try_first_pass
 ```
 
+![config. pam](./images/Captura%20de%20tela%20de%202026-10-01%2017-12-20.png)
+
 Funcionamento:
 
 ```
 USB OU senha
 ```
 
-![Configuração do PAM](/metodo-02/images/Captura%20de%20tela%20de%202026-10-01%2017-10-53.png)
 
 ---
 
@@ -137,11 +142,6 @@ Com o pendrive conectado:
 - Usuário selecionado no GDM.
 - Entrada realizada sem digitar senha.
 
-Resultado:
-
-Funcionando.
-
-![Login utilizando o USB](./images/Captura%20de%20tela%20de%202026-10-01%2017-11-12.png)
 
 ---
 
@@ -152,11 +152,6 @@ Com o pendrive removido:
 - Login tradicional realizado.
 - Senha aceita normalmente.
 
-Resultado:
-
-Funcionando.
-
-![Login utilizando senha](./images/Captura%20de%20tela%20de%202026-10-01%2017-11-25.png)
 
 ---
 
@@ -168,7 +163,6 @@ Resultado:
 
 O login utilizando apenas o USB continuou funcionando.
 
-![Teste após reinicialização](./images/Captura%20de%20tela%20de%202026-10-01%2017-12-05.png)
 
 ---
 
@@ -208,7 +202,8 @@ Resultado:
 0
 ```
 
-![Correção dos One Time Pads](./images/Captura%20de%20tela%20de%202026-10-01%2017-12-20.png)
+![corrigindo one-time-pad](./images/Captura%20de%20tela%20de%202026-10-01%2017-13-08.png)
+
 
 ---
 
@@ -224,7 +219,6 @@ Motivo:
 
 A conta Google do GNOME também foi validada após reiniciar o serviço `goa-daemon`.
 
-![Configuração das contas GNOME](./images/Captura%20de%20tela%20de%202026-10-01%2017-13-08.png)
 
 ---
 
