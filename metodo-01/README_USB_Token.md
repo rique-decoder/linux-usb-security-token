@@ -2,9 +2,11 @@
 
 Guia para configurar o bloqueio e o desbloqueio automático de uma sessão gráfica no Debian 13 usando `udev`, Bash e `loginctl`.
 
-**Status:** implementação validada no Debian instalado diretamente no SSD, incluindo teste após reinicialização.
+**Status histórico:** implementação validada no Debian instalado diretamente no SSD, incluindo teste após reinicialização.
 
-Este método controla uma sessão já iniciada. Ele não autentica o primeiro login e não torna o pendrive obrigatório: a senha continua permitindo entrar e desbloquear a sessão.
+> **Estado atual após o Método 02 — Parte 02:** a regra de conexão que solicitava desbloqueio foi comentada. Somente o bloqueio na remoção permanece ativo. Os testes de desbloqueio automático abaixo documentam o experimento original; não devem ser reaplicados sobre a política USB + senha. Consulte a [Parte 02](../metodo-02/README_USB_Token_Metodo_02_Parte_02.md).
+
+Quando usado isoladamente, este método controla uma sessão já iniciada. Ele não autentica o primeiro login e não torna o pendrive obrigatório: a senha continua permitindo entrar e desbloquear a sessão. A política final combinada com PAM é descrita na seção 11.
 
 ## 1. Ambiente e comportamento esperado
 
@@ -145,7 +147,7 @@ sudo -v
 sudo -n loginctl lock-session 2
 ```
 
-A tela deve bloquear imediatamente e desbloquear após aproximadamente 10 segundos. Se permanecer bloqueada, utilize sua senha normalmente.
+No Método 1 isolado, a tela deve bloquear imediatamente e desbloquear após aproximadamente 10 segundos. Se permanecer bloqueada, utilize sua senha normalmente. Com a Parte 02 ativa, o desbloqueio normal exige também o USB; não execute este teste de desbloqueio privilegiado para validar a autenticação PAM.
 
 **Resultado observado:** bloqueio e desbloqueio funcionando.
 
@@ -238,7 +240,7 @@ sudo -n /usr/local/bin/usb-lock.sh lock
 
 Se esse teste falhar, resolva o problema antes de criar as regras. Assim é possível distinguir problemas no script de problemas na detecção do USB.
 
-## 6. Criar as regras udev
+## 6. Criar as regras udev do experimento original
 
 Crie o arquivo:
 
@@ -377,9 +379,9 @@ sudo rm /usr/local/bin/usb-lock.sh
 
 Se as regras já estiverem desativadas, remova o arquivo `.disabled` em vez do arquivo `.rules`.
 
-Essas operações não alteram a senha nem os arquivos PAM. Se a tela estiver bloqueada, desbloqueie-a normalmente com sua senha.
+Essas operações não alteram a senha nem os arquivos PAM. No Método 1 isolado, a senha desbloqueia a tela. Se a Parte 02 estiver ativa, o desbloqueio pelo GDM continua exigindo USB + senha mesmo após remover as regras udev.
 
-## 11. Limitações e relação com o método 2
+## 11. Limitações do método isolado e relação com o método 2
 
 - O método 1 atua somente em sessões existentes; não autentica o login inicial.
 - A senha continua permitindo desbloquear a sessão sem o pendrive.
@@ -389,7 +391,18 @@ Essas operações não alteram a senha nem os arquivos PAM. Se a tela estiver bl
 - O funcionamento depende do ambiente gráfico atender aos comandos de `loginctl`.
 - A configuração cobre apenas o usuário e o assento especificados no script.
 
-O método 2 utilizará PAM e `pam_usb` para participar da autenticação. Ao avançar para ele, será necessário revisar o desbloqueio automático do método 1: `loginctl unlock-session` pode liberar a sessão sem passar pela autenticação que se pretende exigir.
+O [Método 02 — Parte 01](../metodo-02/README_USB_Token_Metodo_02_Parte_01.md) implementou USB **ou** senha. A [Parte 02](../metodo-02/README_USB_Token_Metodo_02_Parte_02.md) substituiu essa política por USB **e** senha no GDM e desativou o desbloqueio automático do Método 1.
+
+### Regras na configuração final combinada
+
+```udev
+# Desativado na Parte 02: ACTION=="add", SUBSYSTEM=="block", ENV{DEVTYPE}=="disk", ENV{ID_BUS}=="usb", ENV{ID_VENDOR_ID}=="0781", ENV{ID_MODEL_ID}=="5567", ENV{ID_SERIAL_SHORT}=="4C530101421215115090", RUN+="/usr/local/bin/usb-lock.sh unlock"
+ACTION=="remove", SUBSYSTEM=="block", ENV{DEVTYPE}=="disk", ENV{ID_BUS}=="usb", ENV{ID_VENDOR_ID}=="0781", ENV{ID_MODEL_ID}=="5567", ENV{ID_SERIAL_SHORT}=="4C530101421215115090", RUN+="/usr/local/bin/usb-lock.sh lock"
+```
+
+O script continua instalado e aceita ambas as ações, mas a regra ativa chama somente `lock`. Um administrador ainda pode solicitar desbloqueio via `loginctl`, se o ambiente gráfico atender ao pedido. A autenticação PAM não limita os poderes de root.
+
+As ações usadas por `RUN` devem ser curtas. Não execute agentes permanentes nem comandos que aguardem a reconexão dentro da regra udev. O bloqueio depende do atendimento da solicitação pelo ambiente gráfico; a regra não fiscaliza continuamente a ausência do dispositivo.
 
 ## 12. Checklist da implementação validada
 
