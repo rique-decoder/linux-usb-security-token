@@ -32,3 +32,7 @@ Sugestão de commit:
 ```text
 docs: documenta USB e senha no GDM e revisa os guias anteriores
 ```
+
+## Complemento: scripts auxiliares
+
+Foram adicionados os quatro scripts propostos, um menu, utilitários compartilhados, documentação de uso e testes em arquivos temporários. A recuperação não habilita o perfil global, não desbloqueia a tela diretamente e não executa restauração completa automaticamente. O novo pacote inclui toda a árvore atualizada; copie também `scripts/` e `tests/` para o repositório.

@@ -335,6 +335,16 @@ Atualizações de pacotes ou uma reinstalação do pam_usb podem alterar arquivo
 - A exigência cobre o fluxo GDM testado. O TTY e sudo permanecem disponíveis por senha para recuperação; administradores podem alterar a política.
 - O projeto não aplica criptografia ao SSD nem altera autenticação de boot, SSH ou todos os serviços do computador.
 
+## Ferramentas auxiliares
+
+O repositório também fornece um [menu e scripts](../scripts/README.md) de diagnóstico, backup, teste e recuperação:
+
+```bash
+bash scripts/menu.sh
+```
+
+Eles são opcionais e não precisam ser executados novamente para manter a configuração já validada. A recuperação automatiza somente a desativação local da regra USB do GDM, com confirmação e backup.
+
 ## Referências
 
 - [pam_usb 0.9.3](https://github.com/mcdope/pam_usb/tree/0.9.3)

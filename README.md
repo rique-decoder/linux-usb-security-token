@@ -89,7 +89,17 @@ Salve, retorne à interface gráfica e inicie uma nova tentativa de autenticaç�
 - `REVISAO_DOCUMENTACAO.md`: registro das correções desta revisão.
 - `LICENSE`: licença existente do repositório.
 
-Os scripts e as regras são apresentados nos blocos dos guias; esta revisão não adiciona instaladores nem arquivos executáveis independentes.
+## Ferramentas interativas
+
+Os [scripts auxiliares](scripts/README.md) oferecem diagnóstico, backup, testes guiados e recuperação. Para abrir o menu na pasta do repositório:
+
+```bash
+bash scripts/menu.sh
+```
+
+O menu solicita sudo nas opções administrativas. A recuperação exige confirmação e cria um backup antes de comentar a regra USB do GDM. Os scripts não são um instalador automático; as regras e o script de bloqueio continuam documentados nos guias.
+
+A pasta `scripts/` contém as ferramentas e `tests/` contém verificações em arquivos temporários, sem alterar o PAM real.
 
 ## Referências técnicas
 
