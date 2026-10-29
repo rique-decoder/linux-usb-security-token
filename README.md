@@ -2,7 +2,7 @@
 
 Projeto educacional para utilizar um pendrive comum no controle de sessão e na autenticação do Linux.
 
-**Estado atual:** Método 02 — Parte 02 validado no Debian 13 instalado no Lenovo IdeaPad 3i, incluindo teste após reinicialização. O GDM exige pendrive + senha; a remoção do pendrive bloqueia a sessão gráfica e a reconexão não a desbloqueia automaticamente.
+**Estado atual:** Método 02 — Parte 02 validado no Debian 13 instalado no Lenovo IdeaPad 3i, incluindo teste após reinicialização. O GDM exige pendrive + senha; a remoção do pendrive bloqueia a sessão; o login pelo TTY continua usando senha.
 
 ## Documentação e ordem das etapas
 
@@ -13,6 +13,8 @@ Projeto educacional para utilizar um pendrive comum no controle de sessão e na 
 | [Método 02 — Parte 02](metodo-02/README_USB_Token_Metodo_02_Parte_02.md) | Exigir USB **e** senha no GDM, preservando recuperação pelo TTY | Validado no notebook, incluindo testes físicos e reinicialização |
 
 Os documentos anteriores preservam o histórico. Não reaplique as regras de desbloqueio do Método 1 nem o perfil USB global da Parte 01 sobre a configuração final.
+
+> Para desabilitar temporariamente a proteção sem remover os arquivos de configuração, use [DESABILITAR_TOKEN.md](DESABILITAR_TOKEN.md). Esse procedimento é reversível e cobre os métodos 01 e 02 separadamente.
 
 ## Ambiente
 
@@ -27,7 +29,7 @@ Os documentos anteriores preservam o histórico. Não reaplique as regras de des
 | Volume do pendrive | FAT, UUID `9EE3-C03C` |
 | Autenticação USB | pam_usb 0.9.3 |
 
-O projeto começou em uma VM Debian no VirtualBox. Os guias disponíveis do Método 1 e da Parte 01 também registram testes posteriores; a Parte 02 foi aplicada ao sistema principal. O ambiente de cada registro deve ser respeitado ao reproduzir os passos. `/dev/sda1` foi o nome observado do pendrive, não um endereço permanente.
+O projeto começou em uma VM Debian no VirtualBox. Os guias disponíveis do Método 1 e da Parte 01 também registram testes posteriores; a Parte 02 foi aplicada ao sistema principal. O ambiente documentado é o do notebook usado para a validação final.
 
 ## Comportamento final
 
@@ -42,7 +44,7 @@ O projeto começou em uma VM Debian no VirtualBox. Os guias disponíveis do Mét
 | Administração por sudo | Usa a política de senha do sistema; USB não é exigido por esta configuração |
 | Reinicialização | Configuração persistiu nos testes confirmados pelo usuário |
 
-A exigência do USB foi colocada em `/etc/pam.d/gdm-password`, antes de `@include common-auth`. O perfil `libpam-usb` foi desabilitado no `pam-auth-update`, retirando o USB da autenticação compartilhada. Não foram alterados os serviços PAM de TTY e sudo.
+A exigência do USB foi colocada em `/etc/pam.d/gdm-password`, antes de `@include common-auth`. O perfil `libpam-usb` foi desabilitado no `pam-auth-update`, retirando o USB da autenticação compartilhada, e a regra final foi mantida somente no serviço `gdm-password`.
 
 ## O papel de cada mecanismo
 
@@ -54,13 +56,13 @@ O script do Método 1 ainda aceita `unlock`, mas nenhuma regra ativa de conexão
 
 ## Escopo e limites
 
-O pendrive é um fator de posse e a senha é um fator de conhecimento. Um dispositivo de armazenamento comum não oferece as mesmas garantias de proteção de chaves de um token FIDO2/U2F. Os pads são arquivos secretos verificáveis, e a identificação USB também depende de propriedades fornecidas pelo dispositivo.
+O pendrive é um fator de posse e a senha é um fator de conhecimento. Um dispositivo de armazenamento comum não oferece as mesmas garantias de proteção de chaves de um token FIDO2/U2F. Os pads e a serial do dispositivo ajudam a identificar o token, mas não substituem autenticação criptográfica forte.
 
-Esta configuração protege o fluxo gráfico testado. Ela não cifra o SSD, não bloqueia o boot e não exige USB para todos os serviços do sistema. Quem possui a senha e autorização de sudo pode recuperar o acesso pelo TTY; isso é uma decisão explícita deste projeto.
+Esta configuração protege o fluxo gráfico testado. Ela não cifra o SSD, não bloqueia o boot e não exige USB para todos os serviços do sistema. Quem possui a senha e autorização de sudo pode administrar a máquina; o pendrive não é um requisito global para todos os serviços PAM.
 
-Outros usuários, login automático, impressão digital, SSH e outros serviços PAM não foram validados nesta etapa. Alterar `gdm-password` pode afetar outros usuários que utilizem esse serviço; o guia cobre a conta cadastrada `henrique`.
+Outros usuários, login automático, impressão digital, SSH e outros serviços PAM não foram validados nesta etapa. Alterar `gdm-password` pode afetar outros usuários que utilizem esse serviço na mesma máquina.
 
-Remova o USB somente após concluir gravações e desmontar o volume. O pam_usb pode renovar os pads durante a autenticação, portanto a integridade do sistema de arquivos é parte do funcionamento do projeto.
+Remova o USB somente após concluir gravações e desmontar o volume. O pam_usb pode renovar os pads durante a autenticação, portanto a integridade do sistema de arquivos é parte do funcionamento seguro do pendrive.
 
 ## Recuperação rápida
 
@@ -76,7 +78,9 @@ Comente apenas esta linha:
 # auth required pam_usb.so
 ```
 
-Salve, retorne à interface gráfica e inicie uma nova tentativa de autenticação. O GDM volta a aceitar a senha sem USB. Não é necessário reiniciar o GDM. O [guia da Parte 02](metodo-02/README_USB_Token_Metodo_02_Parte_02.md#9-recuperação-sem-o-pendrive) explica o procedimento completo, a reativação e a restauração do backup.
+Salve, retorne à interface gráfica e inicie uma nova tentativa de autenticação. O GDM volta a aceitar a senha sem USB. Não é necessário reiniciar o GDM. O guia da Parte 02 documenta a recuperação completa e a restauração do estado anterior.
+
+Para uma desativação reversível sem apagar a configuração, consulte [DESABILITAR_TOKEN.md](DESABILITAR_TOKEN.md).
 
 ## Estrutura real
 
@@ -86,6 +90,7 @@ Salve, retorne à interface gráfica e inicie uma nova tentativa de autenticaç�
 - `metodo-02/README_USB_Token_Metodo_02_Parte_01.md`: histórico de USB ou senha.
 - `metodo-02/README_USB_Token_Metodo_02_Parte_02.md`: implementação de USB + senha e recuperação.
 - `metodo-02/images/`: capturas existentes da Parte 01.
+- `DESABILITAR_TOKEN.md`: procedimento reversível para desativar os métodos sem apagar as configurações.
 - `REVISAO_DOCUMENTACAO.md`: registro das correções desta revisão.
 - `LICENSE`: licença existente do repositório.
 
@@ -97,7 +102,7 @@ Os [scripts auxiliares](scripts/README.md) oferecem diagnóstico, backup, testes
 bash scripts/menu.sh
 ```
 
-O menu solicita sudo nas opções administrativas. A recuperação exige confirmação e cria um backup antes de comentar a regra USB do GDM. Os scripts não são um instalador automático; as regras e o script de bloqueio continuam documentados nos guias.
+O menu solicita sudo nas opções administrativas. A recuperação exige confirmação e cria um backup antes de comentar a regra USB do GDM. Os scripts não são um instalador automático; as regras e arquivos PAM continuam sendo responsabilidade do administrador.
 
 A pasta `scripts/` contém as ferramentas e `tests/` contém verificações em arquivos temporários, sem alterar o PAM real.
 
