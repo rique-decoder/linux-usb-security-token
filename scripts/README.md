@@ -1,102 +1,198 @@
-# Ferramentas interativas do projeto
+# Desabilitar a autenticação por pendrive sem remover as configurações
 
-Scripts auxiliares para a configuração do [Método 02 — Parte 02](../metodo-02/README_USB_Token_Metodo_02_Parte_02.md). Eles não instalam automaticamente o pam_usb nem aplicam a Parte 02 inteira.
+Este documento explica como desativar a proteção por pendrive sem apagar os arquivos de configuração. A ideia é apenas comentar, desabilitar ou renomear as regras ativas, preservando o estado anterior para reativar depois.
 
-## Começar pelo menu
+## Visão geral
 
-Na pasta do repositório:
+Existem dois mecanismos principais no projeto:
 
-```bash
-bash scripts/menu.sh
-```
+- **Método 01:** bloqueio e desbloqueio da sessão gráfica via `udev` + `usb-lock.sh` + `loginctl`
+- **Método 02:** exigência de pendrive no `gdm-password` via `pam_usb.so`
 
-Execute o menu como usuário comum. As opções administrativas solicitam sudo individualmente. Se estiver usando um shell root no TTY, informe `henrique` ao selecionar os testes; não teste autenticação do GDM com root.
+Para desabilitar tudo de forma segura, normalmente é necessário fazer os dois passos:
 
-| Opção | Script | Efeito |
-| --- | --- | --- |
-| Diagnóstico | `diagnostico.sh` | Consulta sistema, volumes, ferramentas, PAM, regras e sessões |
-| Backup | `backup.sh` | Copia configurações para um novo diretório privado em `/root` |
-| Testes | `testar-autenticacao.sh` | Executa três operações reais de autenticação com pamtester |
-| Recuperação | `recuperar-acesso.sh` | Após confirmação e backup, comenta a regra USB obrigatória do GDM |
+1. comentar a regra do PAM no `gdm-password`
+2. desabilitar ou comentar a regra do `udev` que bloqueia a sessão ao remover o pendrive
 
-Também é possível usar cada ferramenta diretamente, de qualquer pasta, informando seu caminho. Exemplos a partir da raiz do repositório:
+Assim, o login volta ao padrão e o bloqueio por remoção do dispositivo também deixa de atuar.
 
-```bash
-bash scripts/diagnostico.sh
-sudo bash scripts/backup.sh
-sudo bash scripts/testar-autenticacao.sh henrique
-sudo bash scripts/recuperar-acesso.sh
-```
+## 1) Entrar em um TTY e fazer backup
 
-Todos os scripts principais aceitam `--help`. Não é necessário chmod para executar os exemplos com `bash`.
-
-## Dependências
-
-Debian 13, Bash, ferramentas básicas do sistema e Python 3. Para os testes de autenticação:
+Faça login pela console (TTY) com sua conta e senha:
 
 ```bash
-sudo apt update
-sudo apt install pamtester
+Ctrl + Alt + F3
+# ou, no notebook, pode ser:
+Ctrl + Alt + Fn + F3
 ```
 
-A conta e o dispositivo precisam estar cadastrados no pam_usb e a Parte 02 precisa estar configurada. Os scripts não instalam dependências automaticamente.
-
-## Diagnóstico
-
-Não solicita autenticação USB, não renova pads e não altera arquivos. Mostra as regras de autenticação e udev, mas não lê o conteúdo do XML nem dos pads. Identificadores e nomes de usuário podem aparecer; revise a saída antes de compartilhar.
-
-O diagnóstico não declara a configuração segura só porque encontra uma linha. Confira a interpretação e execute os testes reais.
-
-## Backup
-
-O diretório `/root/usb-token-backup.XXXXXX` tem permissão `700`. Guarde o caminho exibido. São copiados:
-
-- `/etc/pam.d/`;
-- `/usr/share/pam-configs/libpam-usb`, se existir;
-- `/etc/udev/rules.d/80-usb.rules`, se existir;
-- `/usr/local/bin/usb-lock.sh`, se existir;
-- `/etc/security/pam_usb.conf`, se existir.
-
-Um registro lista o que foi copiado ou estava ausente. Pads, senhas de `/etc/shadow` e arquivos pessoais não são copiados. Isso é um backup de configuração, não do sistema inteiro. Não publique o diretório.
-
-## Testes guiados
-
-Use preferencialmente um TTY: **Ctrl + Alt + F3**, ou **Ctrl + Alt + Fn + F3** no IdeaPad. A retirada do USB pode bloquear a sessão gráfica.
-
-O script pede que você prepare cada condição e usa `pamtester gdm-password USUARIO authenticate`:
-
-1. USB presente e senha correta: deve ter sucesso.
-2. USB presente e senha incorreta: deve falhar.
-3. USB ausente e senha correta: deve falhar.
-
-A senha é solicitada pelo pamtester, sem captura ou armazenamento pelo script. Antes de retirar o pendrive, termine gravações e desmonte o volume. Os testes podem renovar pads porque executam autenticação de verdade.
-
-O script interrompe se o teste positivo falhar ou se um teste negativo tiver sucesso. Uma saída de falha também pode significar erro do serviço: leia as mensagens, não apenas o código de retorno. A ferramenta não consegue confirmar qual senha você digitou nem se preparou corretamente cada condição física.
-
-Os testes do GDM gráfico, bloqueio na remoção, reconexão, logout e reinicialização permanecem manuais, conforme a Parte 02.
-
-## Recuperação
-
-No TTY, faça login com sua senha e execute a ferramenta com sudo. Ela:
-
-1. Confere se há exatamente uma regra `auth required pam_usb.so` ativa no GDM.
-2. Recusa outras regras USB ativas no GDM e a presença de USB ativo em `common-auth`, pois esses casos exigem revisão própria.
-3. Exibe a mudança proposta e pede a palavra `CONFIRMAR`.
-4. Cria um backup das configurações atuais.
-5. Comenta apenas a regra obrigatória USB em `gdm-password`, preservando as demais linhas, proprietário e permissões do arquivo.
-
-A gravação usa um arquivo temporário no mesmo diretório e substituição atômica. O arquivo original precisa ser regular; links simbólicos são recusados. Se a regra já estiver comentada, o script não altera nada. Configurações ausentes ou ambíguas também são recusadas.
-
-Após recuperar, volte à interface, cancele uma autenticação antiga e tente novamente com sua senha. O script não executa `loginctl unlock-session`, não reinicia o GDM e não muda a regra de bloqueio udev. Outros fatores PAM existentes continuam sujeitos à própria política.
-
-Para reativar o USB, retire manualmente o comentário da regra, mantendo-a antes de `@include common-auth`, e repita os testes. Não reative o perfil global da Parte 01. A [documentação de recuperação](../metodo-02/README_USB_Token_Metodo_02_Parte_02.md#9-recuperação-sem-o-pendrive) explica também a restauração completa; ela não é automática neste script.
-
-## Verificações de desenvolvimento
+Depois, execute:
 
 ```bash
-python3 -m unittest discover -s tests -v
+sudo -i
+backup_dir=/root/usb-token-disabled.$(date +%Y%m%d-%H%M%S)
+mkdir -p "$backup_dir"
+
+cp -a /etc/pam.d "$backup_dir/"
+cp -a /etc/security/pam_usb.conf "$backup_dir/" 2>/dev/null || true
+cp -a /etc/udev/rules.d/80-usb.rules "$backup_dir/" 2>/dev/null || true
+cp -a /usr/share/pam-configs/libpam-usb "$backup_dir/" 2>/dev/null || true
+cp -a /usr/local/bin/usb-lock.sh "$backup_dir/" 2>/dev/null || true
+
+echo "Backup em: $backup_dir"
 ```
 
-Os testes usam arquivos temporários, verificam a edição e recusa de casos ambíguos, a preservação de linhas e permissões, a execução repetida, a sintaxe Bash e a ajuda. Não testam a integração PAM do notebook nem alteram o PAM real.
+Isso não remove nada; apenas salva uma cópia do estado atual.
 
-A camada de edição é `lib/editar-gdm.py`, chamada pelo recuperador. `lib/comum.sh` contém utilitários de backup e interação; esses arquivos não são opções independentes do menu.
+## 2) Método 02: desabilitar a regra do USB no GDM
+
+Abra o arquivo do GDM:
+
+```bash
+sudo nano /etc/pam.d/gdm-password
+```
+
+Localize a linha:
+
+```text
+auth required pam_usb.so
+```
+
+e transforme em comentário:
+
+```text
+# auth required pam_usb.so
+```
+
+Salve:
+
+```text
+Ctrl + O
+Enter
+Ctrl + X
+```
+
+Esse ajuste remove a exigência do pendrive para autenticar no GDM. Em geral, isso é suficiente para o login voltar ao padrão, com senha sem pendrive.
+
+### Opcional: desabilitar o perfil pam_usb do sistema
+
+Se quiser desativar o perfil em vez de apenas comentar a linha manualmente:
+
+```bash
+sudo pam-auth-update --disable libpam-usb
+```
+
+Se a interface aparecer, mantenha a autenticação do sistema habilitada e desative a opção de USB.
+
+## 3) Método 01: desabilitar a regra udev sem apagar o arquivo
+
+Abra a regra USB:
+
+```bash
+sudo nano /etc/udev/rules.d/80-usb.rules
+```
+
+Procure por linhas como:
+
+```text
+ACTION=="add", ... RUN+="/usr/local/bin/usb-lock.sh unlock"
+ACTION=="remove", ... RUN+="/usr/local/bin/usb-lock.sh lock"
+```
+
+Comente-as:
+
+```text
+# ACTION=="add", ... RUN+="/usr/local/bin/usb-lock.sh unlock"
+# ACTION=="remove", ... RUN+="/usr/local/bin/usb-lock.sh lock"
+```
+
+Ou, com shell:
+
+```bash
+sudo sed -i '/usb-lock\.sh/s/^/# /' /etc/udev/rules.d/80-usb.rules
+sudo udevadm control --reload-rules
+```
+
+Isso desativa o bloqueio automático da sessão por remoção do pendrive sem remover o arquivo da regra.
+
+## 4) Como confirmar que tudo foi desabilitado
+
+Verifique:
+
+```bash
+grep -n "pam_usb.so" /etc/pam.d/gdm-password || true
+grep -n "usb-lock.sh" /etc/udev/rules.d/80-usb.rules || true
+```
+
+Se as linhas estiverem comentadas, a proteção foi apenas desativada e não apagada.
+
+## 5) Voltar para a interface gráfica
+
+```bash
+sudo chvt 2
+```
+
+Agora tente logar normalmente com senha, sem pendrive.
+
+## 6) Quando cada parte deve ser desativada
+
+### Método 02 ativo
+
+Se o pendrive está sendo exigido no login gráfico, a etapa principal é:
+
+```text
+# auth required pam_usb.so
+```
+
+em `/etc/pam.d/gdm-password`.
+
+### Método 01 ativo
+
+Se a sessão está sendo bloqueada ao retirar o pendrive, a etapa principal é comentar a regra do `udev` em:
+
+```text
+/etc/udev/rules.d/80-usb.rules
+```
+
+### Ambos ativos
+
+Se o sistema estiver com os dois métodos configurados, o procedimento completo e seguro é:
+
+1. comentar `pam_usb.so` no `gdm-password`
+2. comentar a regra do `udev` para `usb-lock.sh`
+3. opcionalmente desabilitar o perfil do `pam_usb` com `pam-auth-update --disable libpam-usb`
+
+## 7) Como reativar depois
+
+Se quiser voltar a exigir USB, basta remover o `#` das linhas que você comentou e reativar os módulos:
+
+```text
+auth required pam_usb.so
+```
+
+E para o `udev`:
+
+```bash
+sudo udevadm control --reload-rules
+```
+
+Para reativar o perfil do pam_usb:
+
+```bash
+sudo pam-auth-update --enable libpam-usb
+```
+
+## 8) Observação final
+
+Este processo é de “desabilitar”, não de “remover”. Ou seja:
+
+- os arquivos ficam intactos;
+- o estado anterior pode ser recuperado facilmente;
+- você pode reativar a proteção sem reinstalar tudo.
+
+Em resumo:
+
+- para o Método 02, desative o `pam_usb.so` no `gdm-password`
+- para o Método 01, desative a regra do `udev`
+- para desabilitar tudo sem apagar nada, faça os dois
+
