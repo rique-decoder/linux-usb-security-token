@@ -48,9 +48,14 @@ def processar(caminho, consultar=False):
         with os.fdopen(fd, "wb") as arquivo:
             arquivo.write(novo)
             arquivo.flush()
-            os.fchmod(arquivo.fileno(), stat.S_IMODE(info.st_mode))
             if os.geteuid() == 0:
                 os.fchown(arquivo.fileno(), info.st_uid, info.st_gid)
+            os.fchmod(arquivo.fileno(), stat.S_IMODE(info.st_mode))
+            # Preserve ACLs and other xattrs when replacing the file's inode.
+            # If copying any attribute fails, leave the original untouched.
+            for nome in os.listxattr(caminho, follow_symlinks=False):
+                valor = os.getxattr(caminho, nome, follow_symlinks=False)
+                os.setxattr(temp, nome, valor, follow_symlinks=False)
             os.fsync(arquivo.fileno())
         atual = caminho.lstat()
         if (atual.st_dev, atual.st_ino, atual.st_mtime_ns, atual.st_size) != (info.st_dev, info.st_ino, info.st_mtime_ns, info.st_size) or caminho.read_bytes() != dados:
